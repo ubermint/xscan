@@ -1,0 +1,10 @@
+TO DO:
++	show latency
+	add progress bar
++	add port2service print
+	add most used ports
+	boost perf
+	refactor
++	check if host live with icmp
+	add email report
++	add scan without mask
