@@ -1,10 +1,14 @@
 TO DO:
 +	show latency
-	add progress bar
 +	add port2service print
-	add most used ports
++	add most used ports
++	add scan without mask
++	check if host live with icmp
++	add progress bar
++   add argparse
++   add database
+	add email report
+	add UDP
 	boost perf
 	refactor
-+	check if host live with icmp
-	add email report
-+	add scan without mask
+	test prog
