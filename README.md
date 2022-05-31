@@ -6,7 +6,8 @@ TO DO:
 +	check if host live with icmp
 +	add progress bar
 +   add argparse
-+   add database
+	add server
+    add database
 	add email report
 	add UDP
 	boost perf

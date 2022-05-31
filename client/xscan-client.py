@@ -8,28 +8,45 @@ import threading
 import subprocess
 import argparse
 import errno
+import datetime
+import json
 import time
 
-from alive_progress import alive_bar
+from alive_progress import alive_bar  # external library
 
-class Database():
-    def __init__(self, report):
+
+class Client():
+    def __init__(self, report, network):
         self.report = report
+        self.network = network
     
-    def load(self):
-        pass
+    def save(self):
+        sub  = f"{int(self.network.network_address)}-{self.network.prefixlen}"
+        f_name = f"report-{int(time.time())}-{sub}.json"
+        with open(f_name, "w") as outf:
+            json.dump(self.report, outf)
+        print(f"System: report saved as {f_name}")
 
-    def report(self):
-        pass
+    def send(self, addr):
+        port = 4444
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            data = json.dumps(self.report)
+            sock.sendto(data.encode(), (str(addr), port))
+            print("System: report received by server!")
+        except:
+            sys.exit("Error! Unable to send report.")
+        finally:
+            sock.close()
+
 
 class Scanner():
-    def __init__(self, network, top_n_ports, delay):
+    def __init__(self, network):
         self.network = network
-        self.delay = delay
+        self.delay = 3
         with open("tcp_ports.txt", "r") as f:
-            self.ports = list(map(int, f.read().strip().split(",")))[:top_n_ports]
+            self.ports = list(map(int, f.read().strip().split(",")))
         
-
     def run(self):
         active = 0
         num_hosts = self.network.num_addresses - 2 if self.network.prefixlen < 31 else self.network.num_addresses
@@ -42,22 +59,26 @@ class Scanner():
                 latency = host.ICMP_ping()
 
                 if latency:
+                    t_now = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
                     print(f"Host {host.addr} is up! Latency {latency} ms.")
                     active += 1
                     output = self.scan_ports(host)
                     if output:
                         for port in output:
                             try:
-                                name = socket.getservbyport(port[0])
+                                name = socket.getservbyport(port)
                             except:
                                 name = "unknown"
-                            print(f"\tPORT {port[0]}/tcp {name} - {port[1]}")
+                            print(f"\tPORT {port}/tcp {name} - open")
                     else:
                         print("\tNo open ports detected.")
 
+                    result[str(addr)] = {'time': t_now, 'ports': output}
+
                 bar()
 
-            print(f"Scan completed! Detected {active} active hosts.")
+        print(f"\nScan completed! Detected {active} active hosts.")
+        return result
 
 
     def scan_ports(self, host):
@@ -76,9 +97,6 @@ class Scanner():
 
         return output
 
-    def report(self):
-        print("")
-
 
 class Host():
     def __init__(self, addr, delay):
@@ -91,13 +109,15 @@ class Host():
         TCPsock.settimeout(self.delay)
         try:
             TCPsock.connect((self.addr, port))
-            output.append((port, "open"))
+            output.append(port)
+            #output.append((port, "open"))
         except socket.timeout as err:
             pass
             #output.append((port, "filtered"))  # unable to distinguish timeout from firewall filtering
         except socket.error as err:
             pass
-        TCPsock.close()
+        finally:
+            TCPsock.close()
 
     def ICMP_ping(self):
         "ping -c 1 -W 0.5 ip > /dev/null 2>&1"
@@ -110,12 +130,13 @@ class Host():
 
 
 def main():
-    print("xscan v0.3")
+    os.system('clear')
+    print("xscan v0.4")
 
     parser = argparse.ArgumentParser()
     parser.add_argument("network", help="Private subnetwork for scan.")
-    parser.add_argument("-d", "--delay", type=int, help="Delay in seconds. (default: 5s)")
-    parser.add_argument("-t", "--top", type=int, help="Number of most used ports. (default: 100)")
+    #parser.add_argument("-d", "--delay", type=int, help="Delay in seconds. (default: 5s)")
+    #parser.add_argument("-t", "--top", type=int, help="Number of most used ports. (default: 100)")
     parser.add_argument("-r", "--report",
         action="store_true", help="Report based on report.json (default: off)")
 
@@ -128,29 +149,31 @@ def main():
     except:
         sys.exit("Error! Invalid network.")
 
-
-    delay = 3
-    if args.delay:
-        if (1 <= args.delay <= 10):
-            delay = args.delay
-        else:
-            sys.exit("Error! Invalid delay.")
-
+    """
     top_n_ports = 100
     if args.top:
         if 1 <= args.top <= 1000:
             top_n_ports = args.top
         else:
             sys.exit("Error! Invalid number of ports.")
+    """
 
-    scanner = Scanner(network, top_n_ports, delay)
+    scanner = Scanner(network)
 
     try:
         result = scanner.run()
     except KeyboardInterrupt:
         sys.exit("\nScanner aborted by interruption.")
 
-
+    if args.report:
+        cl = Client(result, network)
+        print("\nTo send report type server address, otherwise it will be saved locally.")
+        inp = input()
+        try:
+            addr = ipaddress.ip_address(inp)
+            cl.send(addr)
+        except:
+            cl.save()
 
 if __name__ == "__main__":
     main()
