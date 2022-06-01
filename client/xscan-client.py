@@ -11,21 +11,18 @@ import errno
 import datetime
 import json
 import time
-
-from alive_progress import alive_bar  # external library
+from alive_progress import alive_bar
 
 
 class Client():
-    def __init__(self, report, network):
+    def __init__(self, report):
         self.report = report
-        self.network = network
     
     def save(self):
-        sub  = f"{int(self.network.network_address)}-{self.network.prefixlen}"
-        f_name = f"report-{int(time.time())}-{sub}.json"
+        f_name = f"report-{int(time.time())}.json"
         with open(f_name, "w") as outf:
             json.dump(self.report, outf)
-        print(f"System: report saved as {f_name}")
+        print(f"System: отчёт сохранен как {f_name}")
 
     def send(self, addr):
         port = 4444
@@ -33,9 +30,9 @@ class Client():
         try:
             data = json.dumps(self.report)
             sock.sendto(data.encode(), (str(addr), port))
-            print("System: report received by server!")
+            print("System: сервер получил отчёт.")
         except:
-            sys.exit("Error! Unable to send report.")
+            sys.exit("Error! Невозможно отправить отчёт!.")
         finally:
             sock.close()
 
@@ -49,8 +46,11 @@ class Scanner():
         
     def run(self):
         active = 0
-        num_hosts = self.network.num_addresses - 2 if self.network.prefixlen < 31 else self.network.num_addresses
-        print(f"Scanning top{len(self.ports)} TCP ports for {num_hosts} hosts.")
+        if self.network.prefixlen < 31:
+            num_hosts = self.network.num_addresses - 2
+        else:
+            self.network.num_addresses
+        print(f"Сканирование TCP-портов для {num_hosts} хостов.")
 
         result = {}
         with alive_bar(num_hosts, enrich_print=False) as bar:
@@ -60,7 +60,7 @@ class Scanner():
 
                 if latency:
                     t_now = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-                    print(f"Host {host.addr} is up! Latency {latency} ms.")
+                    print(f"Хост {host.addr} работает. Задержка {latency} мс.")
                     active += 1
                     output = self.scan_ports(host)
                     if output:
@@ -69,24 +69,25 @@ class Scanner():
                                 name = socket.getservbyport(port)
                             except:
                                 name = "unknown"
-                            print(f"\tPORT {port}/tcp {name} - open")
+                            print(f"\tПорт {port}/tcp {name} - открыт.")
                     else:
-                        print("\tNo open ports detected.")
+                        print("\tНе обнаружено открытых портов.")
 
                     result[str(addr)] = {'time': t_now, 'ports': output}
 
                 bar()
 
-        print(f"\nScan completed! Detected {active} active hosts.")
+        print(f"\nСканирование завершено! Всего {active} активных хостов.")
         return result
-
 
     def scan_ports(self, host):
         threads = []
         output = []
 
         for port in range(len(self.ports)):
-            t = threading.Thread(target=host.TCP_connect, args=(self.ports[port], output))
+            t = threading.Thread(
+                target=host.TCP_connect,
+                args=(self.ports[port], output))
             threads.append(t)
 
         for i in range(len(self.ports)):
@@ -110,70 +111,57 @@ class Host():
         try:
             TCPsock.connect((self.addr, port))
             output.append(port)
-            #output.append((port, "open"))
         except socket.timeout as err:
             pass
-            #output.append((port, "filtered"))  # unable to distinguish timeout from firewall filtering
+            # unable to distinguish timeout from firewall filtering
         except socket.error as err:
             pass
         finally:
             TCPsock.close()
 
     def ICMP_ping(self):
-        "ping -c 1 -W 0.5 ip > /dev/null 2>&1"
         command = ['ping', "-c1", '-W0.5', self.addr]
-        proc = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        proc = subprocess.Popen(command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL)
         output = str(proc.communicate()[0])
         if proc.returncode == 0:
             return float(output[output.index("time")+5:output.index("ms")])
         return None
 
 
-def main():
+if __name__ == "__main__":
     os.system('clear')
-    print("xscan v0.4")
+    print("xscan v0.5")
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("network", help="Private subnetwork for scan.")
-    #parser.add_argument("-d", "--delay", type=int, help="Delay in seconds. (default: 5s)")
-    #parser.add_argument("-t", "--top", type=int, help="Number of most used ports. (default: 100)")
+    parser.add_argument("network", help="адрес и маска сети для сканирования.")
     parser.add_argument("-r", "--report",
-        action="store_true", help="Report based on report.json (default: off)")
+        action="store_true", help="формирование отчёта для сервера.")
 
     args = parser.parse_args()
 
     try:
         network = ipaddress.ip_network(args.network, strict=False)
         if not network.is_private:
-            sys.exit("Error! Only for private network.")
+            sys.exit("Error! Только для приватных сетей.")
     except:
-        sys.exit("Error! Invalid network.")
-
-    """
-    top_n_ports = 100
-    if args.top:
-        if 1 <= args.top <= 1000:
-            top_n_ports = args.top
-        else:
-            sys.exit("Error! Invalid number of ports.")
-    """
+        sys.exit("Error! Некорректно задана сеть.")
 
     scanner = Scanner(network)
 
     try:
         result = scanner.run()
     except KeyboardInterrupt:
-        sys.exit("\nScanner aborted by interruption.")
+        sys.exit("\nСканер прерван.")
 
     if args.report:
-        cl = Client(result, network)
-        print("\nTo send report type server address, otherwise it will be saved locally.")
+        cl = Client(result)
+        print("\nДля отправки отчёта введите адрес сервера,"
+            "иначе он будет сохранен локально.")
         inp = input()
         try:
             addr = ipaddress.ip_address(inp)
             cl.send(addr)
         except:
             cl.save()
-
-if __name__ == "__main__":
-    main()
